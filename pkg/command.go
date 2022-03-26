@@ -4,33 +4,48 @@ import (
 	"strings"
 )
 
-var db = map[string]string{}
-
-func echo(text string) (string, error) {
+func echo(m *Mention, text string) (string, error) {
 	return text, nil
 }
 
-func set(text string) (string, error) {
+func set(m *Mention, text string) (string, error) {
 	items := strings.Split(text, " ")
 	if len(items) < 1 {
 		return "", &InvalidArgumentError{"empty value"}
 	}
-	db[items[0]] = items[1]
-	return "", nil
+	return "", m.storage.Add(items[0], strings.Join(items[1:], " "))
 }
 
-func get(text string) (string, error) {
-	value, ok := db[text]
-	if ok {
-		return value, nil
+func get(m *Mention, text string) (string, error) {
+	text = strings.TrimSpace(text)
+	return m.storage.Get(text)
+}
+
+func list(m *Mention, text string) (string, error) {
+	l, err := m.storage.List(text)
+	if err != nil {
+		return "", err
 	}
-	return "", &NotfoundError{}
+	// looking good with first newline.
+	return "\n" + strings.Join(l, "\n"), nil
+}
+
+func remove(m *Mention, text string) (string, error) {
+	items := strings.Split(text, " ")
+	if len(items) < 1 {
+		return "", &InvalidArgumentError{"empty value"}
+	}
+	return "", m.storage.Remove(items[0], strings.Join(items[1:], " "))
+}
+
+func removeAll(m *Mention, text string) (string, error) {
+	return "", m.storage.RemoveAll(text)
 }
 
 type Command struct {
 	Name      string
 	ShortName []string
-	Action    func(text string) (string, error)
+	Action    func(m *Mention, text string) (string, error)
 	Help      string
 }
 
@@ -52,5 +67,23 @@ var command = []Command{
 		ShortName: []string{"s"},
 		Action:    get,
 		Help:      "get <key>",
+	},
+	{
+		Name:      "list",
+		ShortName: []string{"l"},
+		Action:    list,
+		Help:      "list <key>",
+	},
+	{
+		Name:      "remove",
+		ShortName: []string{"r"},
+		Action:    remove,
+		Help:      "remove <key> <value>",
+	},
+	{
+		Name:      "removeAll",
+		ShortName: []string{"ra"},
+		Action:    removeAll,
+		Help:      "removeAll <key>",
 	},
 }

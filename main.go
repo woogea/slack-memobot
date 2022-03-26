@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"pkg/mention"
+	"regexp"
 	"strings"
+
+	mention "github.com/woogea/slack-memobot/pkg"
 
 	"github.com/joho/godotenv"
 	"github.com/slack-go/slack"
@@ -13,9 +15,12 @@ import (
 	"github.com/slack-go/slack/socketmode"
 )
 
+var mentions = map[string]*mention.Mention{}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
+		// for debug environment. Usualy it will be set by environment variable.
 		log.Println(".env is not found")
 	}
 	appToken := os.Getenv("SLACK_APP_TOKEN")
@@ -77,16 +82,34 @@ func main() {
 					innerEvent := eventsAPIEvent.InnerEvent
 					switch ev := innerEvent.Data.(type) {
 					case *slackevents.AppMentionEvent:
+						// Storage must be provided in each channel.
+						m, ok := mentions[ev.Channel]
+						if !ok {
+							mentions[ev.Channel] = mention.NewMention(ev.Channel)
+							m = mentions[ev.Channel]
+						}
 						fmt.Printf("channel: %v\n ", ev.Channel)
-						fmt.Printf("user: %v\n ", ev.User)
 						fmt.Printf("text: %v\n ", ev.Text)
+						/* mention commmands don't care who sent it.
+						fmt.Printf("user: %v\n ", ev.User)
 						usr, err := api.GetUserInfo(ev.User)
 						if err != nil {
 							fmt.Println("get userinfo error", err)
 						}
 						fmt.Println(usr.Name)
-						mention.Mention()
-						_, _, err = api.PostMessage(ev.Channel, slack.MsgOptionText("Yes, hello.", false))
+						*/
+						// remove mentions
+						re := regexp.MustCompile(`<@.*?>`)
+						body := strings.TrimSpace(re.ReplaceAllString(ev.Text, ""))
+						strs := strings.Split(body, " ")
+						//fmt.Printf("strs: %v", strs)
+						//first is command, second and follows are parameters.
+						resp, err := m.Exec(strs[0], strings.Join(strs[1:], " "))
+						if err != nil {
+							resp = err.Error()
+						}
+						//commands return some message including empty.
+						_, _, err = api.PostMessage(ev.Channel, slack.MsgOptionText(resp, false))
 						if err != nil {
 							fmt.Printf("failed posting message: %v", err)
 						}
@@ -96,64 +119,6 @@ func main() {
 				default:
 					client.Debugf("unsupported Events API event received")
 				}
-			case socketmode.EventTypeInteractive:
-				callback, ok := evt.Data.(slack.InteractionCallback)
-				if !ok {
-					fmt.Printf("Ignored %+v\n", evt)
-
-					continue
-				}
-
-				fmt.Printf("Interaction received: %+v\n", callback)
-
-				var payload interface{}
-
-				switch callback.Type {
-				case slack.InteractionTypeBlockActions:
-					// See https://api.slack.com/apis/connections/socket-implement#button
-
-					client.Debugf("button clicked!")
-				case slack.InteractionTypeShortcut:
-				case slack.InteractionTypeViewSubmission:
-					// See https://api.slack.com/apis/connections/socket-implement#modal
-				case slack.InteractionTypeDialogSubmission:
-				default:
-
-				}
-
-				client.Ack(*evt.Request, payload)
-			case socketmode.EventTypeSlashCommand:
-				cmd, ok := evt.Data.(slack.SlashCommand)
-				if !ok {
-					fmt.Printf("Ignored %+v\n", evt)
-
-					continue
-				}
-
-				client.Debugf("Slash command received: %+v", cmd)
-
-				payload := map[string]interface{}{
-					"blocks": []slack.Block{
-						slack.NewSectionBlock(
-							&slack.TextBlockObject{
-								Type: slack.MarkdownType,
-								Text: "foo",
-							},
-							nil,
-							slack.NewAccessory(
-								slack.NewButtonBlockElement(
-									"",
-									"somevalue",
-									&slack.TextBlockObject{
-										Type: slack.PlainTextType,
-										Text: "bar",
-									},
-								),
-							),
-						),
-					}}
-
-				client.Ack(*evt.Request, payload)
 			default:
 				fmt.Fprintf(os.Stderr, "Unexpected event type received: %s\n", evt.Type)
 			}

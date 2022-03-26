@@ -1,11 +1,22 @@
 package mention
 
-func Mention(cmd string, text string) (string, error) {
+type Mention struct {
+	storage Storage
+}
+
+func NewMention(namespace string) *Mention {
+	return &Mention{storage: NewMemoryStorage(namespace)}
+}
+
+func (m *Mention) Exec(cmd string, text string) (string, error) {
 	i := findFirst(command, cmd)
 	if i != -1 {
-		return command[i].Action(text)
+		return command[i].Action(m, text)
 	} else {
-		return "", &NotfoundError{}
+		//exec get when the command is not found.
+		//return "", &NotfoundError{}
+		i := findFirst(command, "get")
+		return command[i].Action(m, cmd+" "+text)
 	}
 }
 
