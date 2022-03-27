@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slack-memobot
+spec:
+  selector:
+    matchLabels:
+      app: slack-memobot
+  template:
+    metadata:
+      labels:
+        app: slack-memobot
+    spec:
+      restartPolicy: Always
+      containers:
+      - name: slack-memobot
+        image: slack-memobot:latest
+        imagePullPolicy: Never
+        resources:
+          limits:
+            memory: "512Mi"
+            cpu: "1"
+        envFrom:
+          - secretRef:
+              name: dotenv
+        volumeMounts:
+          - mountPath: /goapp/data/
+            name: datavolume 
+      volumes:
+        - name: datavolume
+          persistentVolumeClaim:
+            claimName: datavolume-claim
