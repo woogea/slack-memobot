@@ -16,6 +16,7 @@ import (
 )
 
 var mentions = map[string]*mention.Mention{}
+var openais = map[string]*mention.OpenAI{}
 
 func main() {
 	err := godotenv.Load()
@@ -52,7 +53,7 @@ func main() {
 
 	client := socketmode.New(
 		api,
-		socketmode.OptionDebug(true),
+		//socketmode.OptionDebug(true),
 		socketmode.OptionLog(log.New(os.Stdout, "socketmode: ", log.Lshortfile|log.LstdFlags)),
 	)
 
@@ -90,19 +91,10 @@ func main() {
 						}
 						fmt.Printf("channel: %v\n ", ev.Channel)
 						fmt.Printf("text: %v\n ", ev.Text)
-						/* mention commmands don't care who sent it.
-						fmt.Printf("user: %v\n ", ev.User)
-						usr, err := api.GetUserInfo(ev.User)
-						if err != nil {
-							fmt.Println("get userinfo error", err)
-						}
-						fmt.Println(usr.Name)
-						*/
 						// remove mentions
 						re := regexp.MustCompile(`<@.*?>`)
 						body := strings.TrimSpace(re.ReplaceAllString(ev.Text, ""))
 						strs := strings.Split(body, " ")
-						//fmt.Printf("strs: %v", strs)
 						//first is command, second and follows are parameters.
 						resp, err := m.Exec(strs[0], strings.Join(strs[1:], " "))
 						if err != nil {
@@ -115,7 +107,40 @@ func main() {
 						}
 					case *slackevents.MemberJoinedChannelEvent:
 						fmt.Printf("user %q joined to channel %q", ev.User, ev.Channel)
+					case *slackevents.MessageEvent:
+						fmt.Printf("message is  %q", ev.Text)
+						// if includes atmark into message, break.
+						if strings.Contains(ev.Text, "<@") {
+							break
+						}
+						// if text is empty, break.
+						if ev.Text == "" {
+							break
+						}
+						if openais[ev.Channel] == nil {
+							openais[ev.Channel] = mention.EnableOpenapi()
+							r := "enable OpenAPI"
+							_, _, err = api.PostMessage(ev.Channel, slack.MsgOptionText(r, false))
+							if err != nil {
+								fmt.Printf("failed posting message: %v\n", err)
+							}
+						}
+						if openais[ev.Channel].CanUseOpenai() {
+							//ignoe bot's message
+							isbot := ev.BotID != ""
+							r, err := openais[ev.Channel].CallOpenai(ev.Text, isbot)
+							if err != nil {
+								fmt.Printf("failed calling openai: %v", err)
+							}
+							if !isbot {
+								_, _, err = api.PostMessage(ev.Channel, slack.MsgOptionText(r, false))
+								if err != nil {
+									fmt.Printf("failed posting message: %v\n", err)
+								}
+							}
+						}
 					}
+
 				default:
 					client.Debugf("unsupported Events API event received")
 				}

@@ -134,4 +134,5 @@ func (m *Mention) initCommand() {
 	for _, x := range commanddef {
 		m.command = append(m.command, x)
 	}
+
 }
