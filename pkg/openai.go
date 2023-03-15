@@ -108,6 +108,9 @@ func (o *OpenAI) CanUseOpenai() bool {
 	return o.enabled
 }
 
+// constのstring配列をeraseListとして定義
+var eraseList = []string{"忘れて", "わすれて", "忘れてください", "わすれてください"}
+
 // call openai api and return response. if client is not initialized return error
 func (o *OpenAI) CallOpenai(s string, isbot bool) (string, error) {
 	if !o.enabled {
@@ -117,6 +120,15 @@ func (o *OpenAI) CallOpenai(s string, isbot bool) (string, error) {
 	if isbot {
 		return "", nil
 	}
+
+	// eraseキーワードリストの中にsが一致するものがあれば履歴を忘れる
+	for _, erase := range eraseList {
+		if s == erase {
+			o.rbuf.Clear()
+			return "履歴を忘れました", nil
+		}
+	}
+
 	// create messages
 	messages := []openai.ChatCompletionMessage{}
 	for _, chat := range o.rbuf.All() {
