@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 )
+
+const bufferLength = 100
 
 type OpenAI struct {
 	enabled bool
@@ -87,12 +91,24 @@ func (r *RingBuffer) Clear() {
 	r.tail = 0
 }
 
+// erase half of ring buffer content length from head to tail
+func (r *RingBuffer) EraseHalf() {
+	if r.head > r.tail {
+		r.tail = r.head - (r.head-r.tail)/2
+	} else {
+		r.tail = r.head - (len(r.buf)-(r.tail-r.head))/2
+		if r.tail < 0 {
+			r.tail += len(r.buf)
+		}
+	}
+}
+
 // initialize and create openai client
 func EnableOpenapi() (o *OpenAI) {
 	o = &OpenAI{
 		enabled: true,
 		client:  openai.NewClient(os.Getenv("OPENAI_API_KEY")),
-		rbuf:    NewRingBuffer(8),
+		rbuf:    NewRingBuffer(bufferLength),
 	}
 	return
 }
@@ -116,11 +132,25 @@ func (o *OpenAI) CallOpenai(s string, isbot bool) (string, error) {
 	if !o.enabled {
 		return "", fmt.Errorf("openai is not enabled")
 	}
+	// create messages
+	messages := []openai.ChatCompletionMessage{}
+	for _, chat := range o.rbuf.All() {
+		if chat.chat == "" {
+			continue
+		}
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: chat.chat,
+		})
+	}
 	o.rbuf.Add(Chat{s, isbot})
 	if isbot {
 		return "", nil
 	}
-
+	messages = append(messages, openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleUser,
+		Content: s,
+	})
 	// eraseキーワードリストの中にsが一致するものがあれば履歴を忘れる
 	for _, erase := range eraseList {
 		if s == erase {
@@ -129,37 +159,41 @@ func (o *OpenAI) CallOpenai(s string, isbot bool) (string, error) {
 		}
 	}
 
-	// create messages
-	messages := []openai.ChatCompletionMessage{}
-	for _, chat := range o.rbuf.All() {
-		if chat.chat == "" {
-			continue
-		}
-		if !isbot {
-			messages = append(messages, openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleUser,
-				Content: chat.chat,
-			})
-		} else {
-			messages = append(messages, openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleAssistant,
-				Content: chat.chat,
-			})
-		}
-	}
 	fmt.Printf("messages: %v\n", messages)
 	// create request
-	resp, err := o.client.CreateChatCompletion(
-		context.Background(),
-		openai.ChatCompletionRequest{
-			Model:    openai.GPT3Dot5Turbo,
-			Messages: messages,
-		},
-	)
+	// 3回までリトライする
+	cnt := 0
+	var err error
+	var resp openai.ChatCompletionResponse
+	for cnt < 3 {
+		cnt++
+		// 30秒でタイムアウトするコンテキストを作成
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		fmt.Println("call api")
+		resp, err = o.client.CreateChatCompletion(
+			ctx,
+			openai.ChatCompletionRequest{
+				Model:    openai.GPT3Dot5Turbo,
+				Messages: messages,
+			},
+		)
+		if cancel != nil {
+			cancel()
+		}
+		if err == nil {
+			break
+		}
+	}
+	if cnt == 3 {
+		return "タイムアウト", err
+	}
 	if err != nil {
+		// errに"Please reduce the length of the messages"が含まれていたら履歴を忘れる
+		if condition := strings.Contains(err.Error(), "Please reduce the length of the messages"); condition {
+			o.rbuf.EraseHalf()
+			return "tokenが長すぎるので履歴を半分消しました", err
+		}
 		fmt.Printf("Caht completion error: %v\n", err)
-		o.rbuf.Clear()
-		return "エラーが発生したので、履歴を忘れました", err
 	}
 	return resp.Choices[0].Message.Content, nil
 }

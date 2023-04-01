@@ -126,8 +126,9 @@ func main() {
 							}
 						}
 						if openais[ev.Channel].CanUseOpenai() {
+							fmt.Printf("ev: %v\n", ev)
 							//ignoe bot's message
-							isbot := ev.BotID != ""
+							isbot := ev.BotID != "" || ev.Type == "bot_message"
 							r, err := openais[ev.Channel].CallOpenai(ev.Text, isbot)
 							if err != nil {
 								fmt.Printf("failed calling openai: %v", err)
